@@ -165,6 +165,22 @@ class RC4:
         o = ''.join(o)
         return bytes(o, 'utf8')
 
+    def encrypt_retkey(self, data):
+        """Returns ciphertext and the key used for encryption."""
+        data = bytes(data, 'utf8')
+        o = []
+        k = []
+        for i in data:
+            _k = self.gen()
+            k.append(_k)
+            c = i ^ _k
+            if not c:
+                c = 256
+            o.append(chr(c))
+        o = ''.join(o)
+        k = ''.join(k)
+        return bytes(o, 'utf8'), bytes(k, 'utf8')
+
     def decrypt(self, data):
         _data = codecs.decode(data, 'utf8')[8:]
         data = b''
@@ -174,6 +190,20 @@ class RC4:
         for i in data:
             o.append(chr((i & 0xff) ^ self.gen()))
         return ''.join(o)
+
+    def decrypt_retkey(self, data):
+        """Returns plaintext and the key used for decryption."""
+        _data = codecs.decode(data, 'utf8')[8:]
+        data = b''
+        for i in _data:
+            data += struct.pack('B', ord(i) & 0xff)
+        o = []
+        k = []
+        for i in data:
+            _k = self.gen()
+            k.append(_k)
+            o.append(chr((i & 0xff) ^ _k))
+        return ''.join(o), k
 
 
 class Session:
@@ -291,12 +321,6 @@ class Session:
         self.rxseq = 1
         self.response = ret
 
-    def decrypt(self, data):
-        if len(data) < 8 + 8:
-            return
-        self.rxseq += len(data) - 8
-        return self.rxenc.decrypt(data)
-
     def encrypt(self, data):
         self.txseq += len(data) + 8
         o = b''
@@ -306,6 +330,42 @@ class Session:
         o += self.txenc.encrypt(self.padding)
         return o
 
+    def decrypt(self, data):
+        if len(data) < 8 + 8:
+            return
+        self.rxseq += len(data) - 8
+        return self.rxenc.decrypt(data)
+
+    def encrypt_with_key(self, data, key):
+        ret = b''
+        #ret += self.canonicalize_bytes(struct.pack('!I', self.id))
+        #ret += self.canonicalize_bytes(struct.pack('!I', 1))
+        ret += self._encrypt_with_key(data, key)
+        #ret += self._encrypt_with_key(self.padding, key)
+        return ret
+
+    @staticmethod
+    def _encrypt_with_key(data, key):
+        data = bytes(data, 'utf8')
+        o = []
+        for i, v in enumerate(data):
+            c = v ^ key[i]
+            if not c:
+                c = 256
+            o.append(chr(c))
+        o = ''.join(o)
+        return bytes(o, 'utf8')
+
+    def decrypt_with_key(self, data, key):
+        _data = codecs.decode(data, 'utf8')[8:]
+        data = b''
+        for i in _data:
+            data += struct.pack('B', ord(i) & 0xff)
+        o = []
+        for i, v in enumerate(data):
+            o.append(chr((v & 0xff) ^ key[i]))
+        return ''.join(o)
+
     def encrypt_uri(self, uri):
         # TODO: implement
         pass
@@ -313,6 +373,10 @@ class Session:
     def tx_decrypt_uri(self, query_string):
         query_string = urllib.parse.unquote_to_bytes(query_string)
         return self.txenc.decrypt(query_string)
+
+    def tx_decrypt(self, data):
+        _data = codecs.decode(data, 'utf8')[8:]
+        return self.txenc.decrypt(data)
 
 
 if __name__ == "__main__":
