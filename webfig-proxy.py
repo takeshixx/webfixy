@@ -2,6 +2,7 @@
 import sys
 import logging
 import argparse
+import codecs
 import aiohttp
 import aiohttp.web
 
@@ -98,8 +99,22 @@ class WebFigProxy(aiohttp.web.Application):
             yield from request.release()
 
         if len(req_body) and self.session.is_authenticated():
-            p = self.session.txenc.decrypt(req_body)
-            LOGGER.info('*** SEND_PLAINTEXT: {}'.format(p))
+            p, k = self.session.txenc.decrypt_retkey(req_body)
+            if not '{' in p or not '}' in p:
+                LOGGER.info('COULD NOT DECRYPT')
+                LOGGER.info('CIPHER: {}'.format(req_body))
+                LOGGER.info('PLAIN: {}'.format(p))
+            else:
+                LOGGER.info('*** SEND_PLAINTEXT: {}'.format(p))
+                enc = self.session.encrypt_with_key(p, k)
+                seqid = codecs.decode(req_body, 'utf8')[:8]
+                seqid = bytes(seqid, 'utf8')
+                enc = seqid + enc
+                if req_body == enc:
+                    LOGGER.info('******* ENCRYPTION IS THE SAME!! *******')
+                    req_body = enc
+                else:
+                    LOGGER.info('******* ENCRYPTION IS __NOT__ THE SAME!! *******')
 
         resp = yield from session.post(
             '{}/jsproxy'.format(self.target_url), data=req_body)
