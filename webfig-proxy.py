@@ -3,6 +3,8 @@ import sys
 import logging
 import argparse
 import codecs
+import json
+import struct
 import aiohttp
 import aiohttp.web
 
@@ -73,7 +75,7 @@ class WebFigProxy(aiohttp.web.Application):
         """Handle GET requests to jsproxy, decoding encrypted query strings."""
         loop = asyncio.get_event_loop()
         session = aiohttp.ClientSession(loop=loop)
-        p = self.session.tx_decrypt_uri(request.query_string)
+        p, k = yield from self.session.tx_decrypt_uri(request.query_string)
         LOGGER.info('*** SEND_PLAINTEXT_URL: {}'.format(p))
         resp = yield from session.get(self.target_url + request.path)
         try:
@@ -99,22 +101,27 @@ class WebFigProxy(aiohttp.web.Application):
             yield from request.release()
 
         if len(req_body) and self.session.is_authenticated():
-            p, k = self.session.txenc.decrypt_retkey(req_body)
-            if not '{' in p or not '}' in p:
+            p, k = yield from self.session.tx_decrypt(req_body)
+            if not p or not k or not '{' in p or not '}' in p:
                 LOGGER.info('COULD NOT DECRYPT')
                 LOGGER.info('CIPHER: {}'.format(req_body))
                 LOGGER.info('PLAIN: {}'.format(p))
             else:
-                LOGGER.info('*** SEND_PLAINTEXT: {}'.format(p))
+                LOGGER.info('>>>>>>>>>>>>>>>>>>>>\n{}\n>>>>>>>>>>>>>>>>>>>>'.format(p))
                 enc = self.session.encrypt_with_key(p, k)
                 seqid = codecs.decode(req_body, 'utf8')[:8]
+                id = struct.unpack('!I', self.session.pack_bytes(seqid)[:4])[0]
+                seq = struct.unpack('!I', self.session.pack_bytes(seqid)[4:8])[0]
+                LOGGER.debug("TX_ID: ", id)
+                LOGGER.debug("TX_SEQ: ", seq)
+                LOGGER.debug("SELF TX_SEQ: ", self.session.txseq)
                 seqid = bytes(seqid, 'utf8')
                 enc = seqid + enc
                 if req_body == enc:
-                    LOGGER.info('******* ENCRYPTION IS THE SAME!! *******')
+                    LOGGER.debug('+++ ENCRYPTION IS THE SAME')
                     req_body = enc
                 else:
-                    LOGGER.info('******* ENCRYPTION IS __NOT__ THE SAME!! *******')
+                    LOGGER.info('!!! ENCRYPTION IS __NOT__ THE SAME')
 
         resp = yield from session.post(
             '{}/jsproxy'.format(self.target_url), data=req_body)
@@ -130,13 +137,17 @@ class WebFigProxy(aiohttp.web.Application):
 
             elif len(req_body) and len(resp_body) and not self.session.is_authenticated():
                 if not self.session.response == req_body:
-                    LOGGER.info('***** RESPONSES ARE NOT THE SAME *****')
+                    LOGGER.error('Authentication response is not the same')
                 LOGGER.info('Authentication successful')
                 self.session.set_authenticated()
 
             if resp.headers['CONTENT-TYPE'] == 'text/plain' and self.session.is_authenticated():
-                p = self.session.rxenc.decrypt(resp_body)
-                LOGGER.info('*** RECEIVE_PLAINTEXT: {}'.format(p))
+                p, k = self.session.rx_decrypt(resp_body)
+                self.session.dequeue()
+                if not p or not k or not '{' in p or not '}' in p:
+                    LOGGER.info('\n\n\n\n\n******** INVALID RECEIVE PLAINTEXT!!\n\n\n{}\n\n\n'.format(p))
+                else:
+                    LOGGER.info('<<<<<<<<<<<<<<<<<<<<\n{}\n<<<<<<<<<<<<<<<<<<<<'.format(p))
         else:
             LOGGER.info('STATUS IS NOT 200: {}'.format(resp.status))
 
@@ -145,6 +156,7 @@ class WebFigProxy(aiohttp.web.Application):
             if k == 'CONTENT-ENCODING':
                 continue
             headers[k] = v
+        session.close()
         return aiohttp.web.Response(status=resp.status, headers=headers, body=resp_body)
 
     @asyncio.coroutine
@@ -173,7 +185,7 @@ class WebFigProxy(aiohttp.web.Application):
 @asyncio.coroutine
 def init_proxy(host, port, target, loop):
     app = WebFigProxy(target=target, loop=loop)
-    handler = app.make_handler()
+    handler = app.make_handler(access_log=None)
     server = yield from loop.create_server(handler, host, port)
     return server, handler
 

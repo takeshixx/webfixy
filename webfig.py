@@ -4,6 +4,7 @@ import hashlib
 import struct
 import codecs
 import urllib.parse
+import asyncio
 
 # dev
 import requests
@@ -31,6 +32,10 @@ def dev_send_response(resp):
                          cookies=cookie,
                          headers=headers,
                          stream=True)
+
+# TODO: add deobfuscated values from engine.js
+# TODO: for encryption/decryption tasks, print out the used key
+# TODO: analyze used keys, try to predict used keys, e.g. based on seq?
 
 
 class MsChapV2:
@@ -191,9 +196,10 @@ class RC4:
             o.append(chr((i & 0xff) ^ self.gen()))
         return ''.join(o)
 
-    def decrypt_retkey(self, data):
+    def decrypt_retkey(self, _data):
         """Returns plaintext and the key used for decryption."""
-        _data = codecs.decode(data, 'utf8')[8:]
+        if isinstance(_data, bytes):
+           _data = codecs.decode(_data, 'utf8')
         data = b''
         for i in _data:
             data += struct.pack('B', ord(i) & 0xff)
@@ -225,6 +231,8 @@ class Session:
         self.padding= '        '
         self.authenticated = False
         self.response = None
+        self.queue = dict()
+        self.txqueue = dict()
 
     def is_authenticated(self):
         return self.authenticated
@@ -346,7 +354,8 @@ class Session:
 
     @staticmethod
     def _encrypt_with_key(data, key):
-        data = bytes(data, 'utf8')
+        if isinstance(data, str):
+            data = bytes(data, 'utf8')
         o = []
         for i, v in enumerate(data):
             c = v ^ key[i]
@@ -370,13 +379,68 @@ class Session:
         # TODO: implement
         pass
 
+    @asyncio.coroutine
     def tx_decrypt_uri(self, query_string):
         query_string = urllib.parse.unquote_to_bytes(query_string)
-        return self.txenc.decrypt(query_string)
+        p, k = yield from self.tx_decrypt(query_string)
+        return p, k
 
+    @asyncio.coroutine
     def tx_decrypt(self, data):
-        _data = codecs.decode(data, 'utf8')[8:]
-        return self.txenc.decrypt(data)
+        _data = codecs.decode(data, 'utf8')
+        __data = self.pack_bytes(_data)
+        if len(data) < 8 + 8:
+            return
+        id = struct.unpack('!I', __data[:4])[0]
+        seq = struct.unpack('!I', __data[4:8])[0]
+        if self.id != id:
+            print("UNMATCHED ID: {} {}".format(self.id, id))
+        if self.txseq != seq:
+            self.txqueue[seq] = _data
+            _data = yield from self.tx_dequeue()
+        _data = _data[8:]
+        self.txseq += len(_data)
+        p, k = self.txenc.decrypt_retkey(_data)
+        return p, k
+
+    def tx_dequeue(self,):
+        data = ''
+        while True:
+            data = self.txqueue.get(self.txseq)
+            if not data:
+                yield from asyncio.sleep(1)
+                continue
+            print('** GOT RIGHT SEQUENCE FROM QUEUE')
+            del self.txqueue[self.txseq]
+            break
+        return data
+
+    def rx_decrypt(self, data):
+        _data = codecs.decode(data, 'utf8')
+        __data = self.pack_bytes(_data)
+        if len(data) < 8 + 8:
+            return
+        id = struct.unpack('!I', __data[:4])[0]
+        seq = struct.unpack('!I', __data[4:8])[0]
+        if self.id != id:
+            print("UNMATCHED ID: {} {}".format(self.id, id))
+        if self.rxseq != seq:
+            self.queue[seq] = data
+            return None, None
+        self.rxseq += len(_data) - 8
+        _data = _data[8:]
+        p, k = self.rxenc.decrypt_retkey(_data)
+        return p, k
+
+    def dequeue(self):
+        data = ''
+        while True:
+            data = self.queue.get(self.rxseq)
+            if not data:
+                break
+            del self.queue[self.rxseq]
+        if data:
+            return self.rx_decrypt(data)
 
 
 if __name__ == "__main__":
