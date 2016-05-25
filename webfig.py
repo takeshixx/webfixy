@@ -6,34 +6,6 @@ import asyncio
 from passlib.utils import des
 from passlib.hash import nthash
 
-# dev
-import requests
-
-USER = 'admin'
-PASS = ''
-HOST = '172.22.11.180'
-
-"""
-* Determine initial request:
-        * POST with content-length=0
-"""
-
-
-def dev_get_challenge():
-    r = requests.post('http://{}/jsproxy'.format(HOST),stream=True)
-    return r.raw.read()
-
-
-def dev_send_response(resp):
-    cookie = {'username': USER}
-    headers = {'Content-Type': 'text/plain;charset=UTF-8'}
-    return requests.post('http://{}/jsproxy'.format(HOST),
-                         data=resp,
-                         cookies=cookie,
-                         headers=headers,
-                         stream=True)
-
-# TODO: add deobfuscated values from engine.js
 
 class MsChapV2:
     """MS-CHAP-V2 challenge-response implementation
@@ -438,31 +410,34 @@ class Session:
 
 
 if __name__ == "__main__":
-    s = Session(USER, PASS)
+    import sys
+    import requests
 
-    challenge = dev_get_challenge()
-    #challenge = open('/tmp/chal.ro', 'rb').read()
+    if not len(sys.argv) is 4:
+        print('Usage: {} host username password'.format(sys.argv[0]))
+        sys.exit()
 
-    resp = s.make_response(challenge)
+    def dev_get_challenge(host):
+        r = requests.post('http://{}/jsproxy'.format(host), stream=True)
+        return r.raw.read()
 
-    re = dev_send_response(resp)
-    re = re.raw.read()
+    def dev_send_response(host, resp):
+        headers = {'Content-Type': 'text/plain;charset=UTF-8'}
+        return requests.post('http://{}/jsproxy'.format(host),
+                             data=resp,
+                             headers=headers,
+                             stream=True)
 
-    #re = open('/tmp/encrypted.ro', 'rb').read()
-
-    p = s.decrypt(re)
-    print(p)
-
-    rr = "{Uff0001:[120],uff0007:5}"
-    
-    c = s.encrypt(rr)
-    print(c)
-
-    re = dev_send_response(c)
-    re = re.raw.read()
-    print("response")
-    print(re)
-
-    print()
-    p = s.decrypt(re)
-    print(p)
+    s = Session(sys.argv[2], sys.argv[3])
+    auth_chal = dev_get_challenge(sys.argv[1])
+    s.make_response(auth_chal)
+    response = dev_send_response(sys.argv[1], s.response)
+    plaintext = s.decrypt(response.raw.read())
+    print('First response:', plaintext)
+    request = "{Uff0001:[120],uff0007:5}"
+    encrypted = s.encrypt(request)
+    print('Sending:', request)
+    response = dev_send_response(sys.argv[1], encrypted)
+    response = response.raw.read()
+    plaintext = s.decrypt(response)
+    print('Second response:', plaintext)
