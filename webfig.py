@@ -1,10 +1,10 @@
-# -*- coding: utf-8 -*-
-from passlib.utils import des
 import hashlib
 import struct
 import codecs
 import urllib.parse
 import asyncio
+from passlib.utils import des
+from passlib.hash import nthash
 
 # dev
 import requests
@@ -34,9 +34,6 @@ def dev_send_response(resp):
                          stream=True)
 
 # TODO: add deobfuscated values from engine.js
-# TODO: for encryption/decryption tasks, print out the used key
-# TODO: analyze used keys, try to predict used keys, e.g. based on seq?
-
 
 class MsChapV2:
     """MS-CHAP-V2 challenge-response implementation
@@ -76,10 +73,7 @@ class MsChapV2:
     def _gen_nt_hash(self, password=None):
         if not password:
             password = self.password
-        password = password.encode('utf-16')[2:]
-        md4 = hashlib.new('md4')
-        md4.update(password)
-        return md4.digest()
+        return nthash.raw_nthash(password)
 
     @staticmethod
     def _gen_nt_hash_hash(nt_hash):
