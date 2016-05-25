@@ -310,16 +310,10 @@ class Session:
         self.rxseq += len(data) - 8
         return self.rxenc.decrypt(data)
 
-    def encrypt_with_key(self, data, key):
-        ret = b''
-        #ret += self.canonicalize_bytes(struct.pack('!I', self.id))
-        #ret += self.canonicalize_bytes(struct.pack('!I', 1))
-        ret += self._encrypt_with_key(data, key)
-        #ret += self._encrypt_with_key(self.padding, key)
-        return ret
-
     @staticmethod
-    def _encrypt_with_key(data, key):
+    def encrypt_with_key(data, key):
+        """Encrypt data with a supplied key. Can be called at
+        any time, will not influence the key scheduling."""
         if isinstance(data, str):
             data = bytes(data, 'utf8')
         o = []
