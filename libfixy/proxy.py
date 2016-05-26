@@ -134,9 +134,6 @@ class WebFigProxy(aiohttp.web.Application):
         finally:
             yield from resp.release()
 
-        #if 'engine' in request.path and False:
-        #    data = data.replace(b'Session.prototype.encrypt=function(str){var seq=this.txseq;this.txseq+=str.length+8;return(word2str(this.id)+word2str(seq))+\nthis.txEnc.encrypt(str)+this.txEnc.encrypt(this.padding);};', b'Session.prototype.encrypt=function(str){var seq=this.txseq;this.txseq+=str.length+8;this.txEnc.encrypt(str);this.txEnc.encrypt(this.padding);return(word2str(this.id)+word2str(seq))+\nstr+this.padding;};')
-
         headers = dict()
         for k, v in resp.headers.items():
             if k == 'CONTENT-ENCODING':
