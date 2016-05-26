@@ -8,10 +8,7 @@ from passlib.hash import nthash
 
 
 class MsChapV2:
-    """MS-CHAP-V2 challenge-response implementation
-
-    https://tools.ietf.org/html/rfc2759
-    """
+    """MS-CHAP-V2 challenge-response implementation."""
     # https://tools.ietf.org/html/rfc3079#section-3.4
     magic1 = b'This is the MPPE Master Key'
     magic2 = b'On the client side, this is the send key; on the server side, it is the receive key.'
@@ -101,9 +98,7 @@ class MsChapV2:
 
 
 class RC4:
-    """
-    RC4 implementation for WebFig
-    """
+    """RC4 implementation for WebFig"""
     def __init__(self):
         self.S = []
 
@@ -179,9 +174,7 @@ class RC4:
 
 
 class Session:
-    """
-    WebFig session implementation
-    """
+    """WebFig session implementation"""
     # The hardcoded peer challenge from the original code (!@#$%^&*()_+:3|~)
     peerchal = b'\x21\x40\x23\x24\x25\x5e\x26\x2a\x28\x29\x5f\x2b\x3a\x33\x7c\x7e'
     
@@ -189,16 +182,16 @@ class Session:
         self.username = username
         self.password = password
         self.mschap = MsChapV2()
-        self.rxseq = 0
-        self.rxenc = RC4()
         self.txseq = 0
         self.txenc = RC4()
-        self.id = None
+        self.txqueue = dict()
+        self.rxseq = 0
+        self.rxenc = RC4()
+        self.rxqueue = dict()
         self.padding= '        '
+        self.id = None
         self.authenticated = False
         self.response = None
-        self.queue = dict()
-        self.txqueue = dict()
 
     def is_authenticated(self):
         return self.authenticated
@@ -234,12 +227,7 @@ class Session:
 
     @staticmethod
     def pack_bytes(s):
-        """
-        Pack bytes received from webfig in order use them for calculations.
-
-        :param s:
-        :return:
-        """
+        """Pack bytes received from WebFig in order use them for calculations."""
         o = b''
         for i in s:
             o += struct.pack('B', ord(i) & 0xff)
@@ -247,12 +235,7 @@ class Session:
 
     @staticmethod
     def unpack_bytes(s):
-        """
-        Unpack bytes for sending to webfig.
-
-        :param s:
-        :return:
-        """
+        """Unpack bytes for sending to WebFig."""
         o = b''
         for i in s:
             i = bytes(chr(i), 'utf8')
@@ -325,7 +308,10 @@ class Session:
         o = ''.join(o)
         return bytes(o, 'utf8')
 
-    def decrypt_with_key(self, data, key):
+    @staticmethod
+    def decrypt_with_key(data, key):
+        """Decrypt data with a supplied key. Can be called at
+        any time, will not influence the key scheduling."""
         _data = codecs.decode(data, 'utf8')[8:]
         data = b''
         for i in _data:
@@ -335,18 +321,22 @@ class Session:
             o.append(chr((v & 0xff) ^ key[i]))
         return ''.join(o)
 
-    def encrypt_uri(self, uri):
-        # TODO: implement
-        pass
+    def tx_encrypt_uri(self, query_string):
+        """Encrypt an URI for WebFig."""
+        enc = self.txenc.encrypt(query_string)
+        query_string = self.unpack_bytes(enc)
+        return urllib.parse.quote(query_string)
 
     @asyncio.coroutine
     def tx_decrypt_uri(self, query_string):
+        """Decrypt an URI sent from the client to WebFig."""
         query_string = urllib.parse.unquote_to_bytes(query_string)
         p, k = yield from self.tx_decrypt(query_string)
         return p, k
 
     @asyncio.coroutine
     def tx_decrypt(self, data):
+        """Decrypt traffic sent from the client to WebFig."""
         _data = codecs.decode(data, 'utf8')
         __data = self.pack_bytes(_data)
         if len(data) < 8 + 8:
@@ -354,7 +344,7 @@ class Session:
         id = struct.unpack('!I', __data[:4])[0]
         seq = struct.unpack('!I', __data[4:8])[0]
         if self.id != id:
-            print("UNMATCHED ID: {} {}".format(self.id, id))
+            pass
         if self.txseq != seq:
             self.txqueue[seq] = _data
             _data = yield from self.tx_dequeue()
@@ -363,6 +353,7 @@ class Session:
         p, k = self.txenc.decrypt_retkey(_data)
         return p, k
 
+    @asyncio.coroutine
     def tx_dequeue(self,):
         data = ''
         while True:
@@ -370,12 +361,12 @@ class Session:
             if not data:
                 yield from asyncio.sleep(1)
                 continue
-            print('** GOT RIGHT SEQUENCE FROM QUEUE')
             del self.txqueue[self.txseq]
             break
         return data
 
     def rx_decrypt(self, data):
+        """Decrypt traffic sent from WebFig to the client."""
         _data = codecs.decode(data, 'utf8')
         __data = self.pack_bytes(_data)
         if len(data) < 8 + 8:
@@ -383,22 +374,23 @@ class Session:
         id = struct.unpack('!I', __data[:4])[0]
         seq = struct.unpack('!I', __data[4:8])[0]
         if self.id != id:
-            print("UNMATCHED ID: {} {}".format(self.id, id))
+            pass
         if self.rxseq != seq:
-            self.queue[seq] = data
+            self.rxqueue[seq] = data
             return None, None
         self.rxseq += len(_data) - 8
         _data = _data[8:]
         p, k = self.rxenc.decrypt_retkey(_data)
         return p, k
 
-    def dequeue(self):
+    @asyncio.coroutine
+    def rx_dequeue(self):
         data = ''
         while True:
-            data = self.queue.get(self.rxseq)
+            data = self.rxqueue.get(self.rxseq)
             if not data:
                 break
-            del self.queue[self.rxseq]
+            del self.rxqueue[self.rxseq]
         if data:
             return self.rx_decrypt(data)
 

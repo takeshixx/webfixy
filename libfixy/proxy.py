@@ -1,61 +1,14 @@
-#!/usr/bin/env python3
-import sys
-import logging
-import argparse
 import codecs
-import json
+import logging
 import struct
+import asyncio
 import aiohttp
 import aiohttp.web
 
-import webfig
-
-# asyncio requires at least Python 3.3
-if sys.version_info.major < 3 or \
-    (sys.version_info.major > 2 and
-    sys.version_info.minor < 3):
-    print('At least Python version 3.3 is required to run this script!')
-    sys.exit(1)
-
-# Python 3.4 ships with asyncio in the standard libraries. Users with Python 3.3
-# need to install it, e.g.: pip install asyncio
-try:
-    import asyncio
-except ImportError:
-    print('Please install asyncio!')
-    sys.exit(1)
-try:
-    import uvloop
-    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
-except ImportError:
-    pass
+from .webfig import Session
+from .deobfuscation import print_message
 
 LOGGER = logging.getLogger(__name__)
-ARGS = argparse.ArgumentParser(description="Traffic forwarder")
-ARGS.add_argument(
-    '-H', '--host', default='127.0.0.1',
-    help='Host to listen [default: %(default)s]')
-ARGS.add_argument(
-    '-p', '--port', type=int, default=8080,
-    help='Port to listen [default: %(default)d]')
-ARGS.add_argument(
-    '--target', default='127.0.0.1',
-    help='Host to connect [default: %(default)s]')
-ARGS.add_argument(
-    '--target-port', type=int, default=80,
-    help='Port to connect [default: %(default)d]')
-ARGS.add_argument(
-    '--user', default='admin',
-    help='WebFig username [default: %(default)s]')
-ARGS.add_argument(
-    '--password', default='',
-    help='WebFig password [default: %(default)s]')
-ARGS.add_argument(
-    '-v', '--verbose', action='count', dest='level',
-    default=2, help='Verbose logging (repeat for more verbose)')
-ARGS.add_argument(
-    '-q', '--quiet', action='store_const', const=0, dest='level',
-    default=2, help='Only log errors')
 
 
 class WebFigProxy(aiohttp.web.Application):
@@ -71,7 +24,7 @@ class WebFigProxy(aiohttp.web.Application):
         self.router.add_route('GET', '/{resource}/', self.forward_request)
         self.router.add_route('GET', '/{resource}/{resource2}', self.forward_request)
         self.router.add_route('GET', '/{resource}/{resource2}/', self.forward_request)
-        self.session = webfig.Session(user, password)
+        self.session = Session(user, password)
         assert isinstance(target, tuple)
         self.target = target
         self.target_url = 'http://{}:{}'.format(target[0], target[1])
@@ -115,6 +68,7 @@ class WebFigProxy(aiohttp.web.Application):
                 LOGGER.info('PLAIN: {}'.format(p))
             else:
                 LOGGER.info('>>>>>>>>>>>>>>>>>>>>\n{}\n>>>>>>>>>>>>>>>>>>>>'.format(p))
+                LOGGER.info('>>>>>>>>>>>>>>>>>>>>\n{}\n>>>>>>>>>>>>>>>>>>>>'.format(print_message(p)))
                 enc = self.session.encrypt_with_key(p, k)
                 seqid = codecs.decode(req_body, 'utf8')[:8]
                 id = struct.unpack('!I', self.session.pack_bytes(seqid)[:4])[0]
@@ -150,11 +104,12 @@ class WebFigProxy(aiohttp.web.Application):
 
             if resp.headers['CONTENT-TYPE'] == 'text/plain' and self.session.is_authenticated():
                 p, k = self.session.rx_decrypt(resp_body)
-                self.session.dequeue()
+                self.session.rx_dequeue()
                 if not p or not k or not '{' in p or not '}' in p:
                     LOGGER.info('\n\n\n\n\n******** INVALID RECEIVE PLAINTEXT!!\n\n\n{}\n\n\n'.format(p))
                 else:
                     LOGGER.info('<<<<<<<<<<<<<<<<<<<<\n{}\n<<<<<<<<<<<<<<<<<<<<'.format(p))
+                    LOGGER.info('<<<<<<<<<<<<<<<<<<<<\n{}\n<<<<<<<<<<<<<<<<<<<<'.format(print_message(p)))
         else:
             LOGGER.info('STATUS IS NOT 200: {}'.format(resp.status))
 
@@ -190,47 +145,3 @@ class WebFigProxy(aiohttp.web.Application):
 
         yield from client.close()
         return aiohttp.web.Response(status=resp.status, headers=headers, body=data)
-
-
-@asyncio.coroutine
-def init_proxy(host, port, user, password, target, loop):
-    app = WebFigProxy(
-        user=user,
-        password=password,
-        target=target,
-        loop=loop)
-    handler = app.make_handler(access_log=None)
-    server = yield from loop.create_server(handler, host, port)
-    return server, handler
-
-
-def main():
-    args = ARGS.parse_args()
-    levels = [logging.ERROR, logging.WARN, logging.INFO, logging.DEBUG]
-    if args.level > 2:
-        format = '[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s'
-    else:
-        format = '%(message)s'
-    logging.basicConfig(level=levels[min(args.level, len(levels)-1)], format=format)
-    loop = asyncio.get_event_loop()
-    server, handler = loop.run_until_complete(
-        init_proxy(
-            args.host,
-            args.port,
-            args.user,
-            args.password,
-            (args.target, args.target_port), loop))
-    try:
-        loop.run_forever()
-    except OSError:
-        pass
-    except KeyboardInterrupt:
-        loop.run_until_complete(handler.finish_connections())
-    finally:
-        loop.close()
-
-    return 0
-
-
-if __name__ == '__main__':
-    sys.exit(main())
