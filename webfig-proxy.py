@@ -45,6 +45,12 @@ ARGS.add_argument(
     '--target-port', type=int, default=80,
     help='Port to connect [default: %(default)d]')
 ARGS.add_argument(
+    '--user', default='admin',
+    help='WebFig username [default: %(default)s]')
+ARGS.add_argument(
+    '--password', default='',
+    help='WebFig password [default: %(default)s]')
+ARGS.add_argument(
     '-v', '--verbose', action='count', dest='level',
     default=2, help='Verbose logging (repeat for more verbose)')
 ARGS.add_argument(
@@ -54,7 +60,7 @@ ARGS.add_argument(
 
 class WebFigProxy(aiohttp.web.Application):
 
-    def __init__(self, target, loop=None):
+    def __init__(self, user, password, target, loop=None):
         super(WebFigProxy, self).__init__()
         self._loop = loop
         self.router.add_route('POST', '/jsproxy', self.jsproxy_post)
@@ -65,7 +71,7 @@ class WebFigProxy(aiohttp.web.Application):
         self.router.add_route('GET', '/{resource}/', self.forward_request)
         self.router.add_route('GET', '/{resource}/{resource2}', self.forward_request)
         self.router.add_route('GET', '/{resource}/{resource2}/', self.forward_request)
-        self.session = webfig.Session(webfig.USER, webfig.PASS)
+        self.session = webfig.Session(user, password)
         assert isinstance(target, tuple)
         self.target = target
         self.target_url = 'http://{}:{}'.format(target[0], target[1])
@@ -74,10 +80,10 @@ class WebFigProxy(aiohttp.web.Application):
     def jsproxy_get(self, request):
         """Handle GET requests to jsproxy, decoding encrypted query strings."""
         loop = asyncio.get_event_loop()
-        session = aiohttp.ClientSession(loop=loop)
+        client = aiohttp.ClientSession(loop=loop)
         p, k = yield from self.session.tx_decrypt_uri(request.query_string)
         LOGGER.info('*** SEND_PLAINTEXT_URL: {}'.format(p))
-        resp = yield from session.get(self.target_url + request.path)
+        resp = yield from client.get(self.target_url + request.path)
         try:
             data = yield from resp.read()
         finally:
@@ -88,13 +94,14 @@ class WebFigProxy(aiohttp.web.Application):
             if k == 'CONTENT-ENCODING':
                 continue
             headers[k] = v
+        yield from client.close()
         return aiohttp.web.Response(status=resp.status, headers=headers, body=data)
 
     @asyncio.coroutine
     def jsproxy_post(self, request):
         """Handle POST requests to jsproxy."""
         loop = asyncio.get_event_loop()
-        session = aiohttp.ClientSession(loop=loop)
+        client = aiohttp.ClientSession(loop=loop)
         try:
             req_body = yield from request.read()
         finally:
@@ -123,7 +130,7 @@ class WebFigProxy(aiohttp.web.Application):
                 else:
                     LOGGER.info('!!! ENCRYPTION IS __NOT__ THE SAME')
 
-        resp = yield from session.post(
+        resp = yield from client.post(
             '{}/jsproxy'.format(self.target_url), data=req_body)
 
         try:
@@ -156,15 +163,15 @@ class WebFigProxy(aiohttp.web.Application):
             if k == 'CONTENT-ENCODING':
                 continue
             headers[k] = v
-        session.close()
+        yield from client.close()
         return aiohttp.web.Response(status=resp.status, headers=headers, body=resp_body)
 
     @asyncio.coroutine
     def forward_request(self, request):
         """Handle any other requests."""
         loop = asyncio.get_event_loop()
-        session = aiohttp.ClientSession(loop=loop)
-        resp = yield from session.request(
+        client = aiohttp.ClientSession(loop=loop)
+        resp = yield from client.request(
                 request.method,
                 self.target_url + request.path)
         try:
@@ -172,19 +179,26 @@ class WebFigProxy(aiohttp.web.Application):
         finally:
             yield from resp.release()
 
+        #if 'engine' in request.path and False:
+        #    data = data.replace(b'Session.prototype.encrypt=function(str){var seq=this.txseq;this.txseq+=str.length+8;return(word2str(this.id)+word2str(seq))+\nthis.txEnc.encrypt(str)+this.txEnc.encrypt(this.padding);};', b'Session.prototype.encrypt=function(str){var seq=this.txseq;this.txseq+=str.length+8;this.txEnc.encrypt(str);this.txEnc.encrypt(this.padding);return(word2str(this.id)+word2str(seq))+\nstr+this.padding;};')
+
         headers = dict()
         for k, v in resp.headers.items():
             if k == 'CONTENT-ENCODING':
                 continue
             headers[k] = v
 
-        yield from session.close()
+        yield from client.close()
         return aiohttp.web.Response(status=resp.status, headers=headers, body=data)
 
 
 @asyncio.coroutine
-def init_proxy(host, port, target, loop):
-    app = WebFigProxy(target=target, loop=loop)
+def init_proxy(host, port, user, password, target, loop):
+    app = WebFigProxy(
+        user=user,
+        password=password,
+        target=target,
+        loop=loop)
     handler = app.make_handler(access_log=None)
     server = yield from loop.create_server(handler, host, port)
     return server, handler
@@ -200,7 +214,12 @@ def main():
     logging.basicConfig(level=levels[min(args.level, len(levels)-1)], format=format)
     loop = asyncio.get_event_loop()
     server, handler = loop.run_until_complete(
-        init_proxy(args.host, args.port, (args.target, args.target_port), loop))
+        init_proxy(
+            args.host,
+            args.port,
+            args.user,
+            args.password,
+            (args.target, args.target_port), loop))
     try:
         loop.run_forever()
     except OSError:
