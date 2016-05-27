@@ -70,7 +70,7 @@ class WebFigProxy(aiohttp.web.Application):
                 LOGGER.info('>>>>>>>>>>>>>>>>>>>>\n{}\n>>>>>>>>>>>>>>>>>>>>'.format(p))
                 LOGGER.info('>>>>>>>>>>>>>>>>>>>>\n{}\n>>>>>>>>>>>>>>>>>>>>'.format(print_message(p)))
                 enc = self.session.encrypt_with_key(p, k)
-                seqid = codecs.decode(req_body, 'utf8')[:8]
+                seqid = codecs.decode(req_body)[:8]
                 id = struct.unpack('!I', self.session.pack_bytes(seqid)[:4])[0]
                 seq = struct.unpack('!I', self.session.pack_bytes(seqid)[4:8])[0]
                 LOGGER.debug("TX_ID: ", id)

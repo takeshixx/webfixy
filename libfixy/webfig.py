@@ -148,7 +148,7 @@ class RC4:
         return bytes(o, 'utf8'), bytes(k, 'utf8')
 
     def decrypt(self, data):
-        _data = codecs.decode(data, 'utf8')[8:]
+        _data = codecs.decode(data)[8:]
         data = b''
         for i in _data:
             data += struct.pack('B', ord(i) & 0xff)
@@ -160,7 +160,7 @@ class RC4:
     def decrypt_retkey(self, _data):
         """Returns plaintext and the key used for decryption."""
         if isinstance(_data, bytes):
-           _data = codecs.decode(_data, 'utf8')
+           _data = codecs.decode(_data)
         data = b''
         for i in _data:
             data += struct.pack('B', ord(i) & 0xff)
@@ -257,7 +257,7 @@ class Session:
             self.password = password
 
         # Generate the MS-CHAP-V2 response for authentication
-        response = self.pack_bytes(codecs.decode(response, 'utf8'))
+        response = self.pack_bytes(codecs.decode(response))
         self.id = struct.unpack('!I', response[:4])[0]
         self.seq = struct.unpack('!I', response[4:8])[0]
         authchal = response[8:]
@@ -312,7 +312,7 @@ class Session:
     def decrypt_with_key(data, key):
         """Decrypt data with a supplied key. Can be called at
         any time, will not influence the key scheduling."""
-        _data = codecs.decode(data, 'utf8')[8:]
+        _data = codecs.decode(data)[8:]
         data = b''
         for i in _data:
             data += struct.pack('B', ord(i) & 0xff)
@@ -337,7 +337,7 @@ class Session:
     @asyncio.coroutine
     def tx_decrypt(self, data):
         """Decrypt traffic sent from the client to WebFig."""
-        _data = codecs.decode(data, 'utf8')
+        _data = codecs.decode(data)https://github.com/ernw/nmap-scripts
         __data = self.pack_bytes(_data)
         if len(data) < 8 + 8:
             return
@@ -367,7 +367,7 @@ class Session:
 
     def rx_decrypt(self, data):
         """Decrypt traffic sent from WebFig to the client."""
-        _data = codecs.decode(data, 'utf8')
+        _data = codecs.decode(data)
         __data = self.pack_bytes(_data)
         if len(data) < 8 + 8:
             return
