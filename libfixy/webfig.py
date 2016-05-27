@@ -337,7 +337,7 @@ class Session:
     @asyncio.coroutine
     def tx_decrypt(self, data):
         """Decrypt traffic sent from the client to WebFig."""
-        _data = codecs.decode(data)https://github.com/ernw/nmap-scripts
+        _data = codecs.decode(data)
         __data = self.pack_bytes(_data)
         if len(data) < 8 + 8:
             return
