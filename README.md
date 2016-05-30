@@ -1,7 +1,7 @@
 WebFixy
 =======
 
-[WebFig](http://wiki.mikrotik.com/wiki/Manual:Webfig) is a web management interface that comes with MikroTik's [RouterOS](http://www.mikrotik.com/software). By default it encrypts HTTP traffic (even without SSL/TLS) by implementing a authentication and encryption scheme similar to PPTP. WebFixy is a web proxy that decrypts WebFig sessions on-the-fly in order to observe the communication between a browser and a RouterOS host. It also supports encryption of payloads, which allows to tamper with traffic. However, currently there are various limitations for tampering.
+[WebFig](http://wiki.mikrotik.com/wiki/Manual:Webfig) is a web management interface that comes with MikroTik's [RouterOS](http://www.mikrotik.com/software). By default it encrypts HTTP traffic (even without SSL/TLS) by implementing a authentication and encryption scheme similar to PPTP (MS-CHAP-V2 for authentication, MPPE key derivation and RC4 for encryption). WebFixy is a web proxy that decrypts WebFig sessions on-the-fly in order to observe the communication between a browser and a RouterOS host. It also supports encryption of payloads, which allows to tamper with traffic. However, currently there are various limitations for tampering.
  
 ## Compatibility
 
