@@ -136,7 +136,7 @@ class WebFigProxy(aiohttp.web.Application):
 
         headers = dict()
         for k, v in resp.headers.items():
-            if k == 'CONTENT-ENCODING':
+            if k.lower() == 'content-encoding':
                 continue
             headers[k] = v
 
