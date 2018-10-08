@@ -1,3 +1,4 @@
 passlib
 aiohttp
 demjson
+curve25519-donna
